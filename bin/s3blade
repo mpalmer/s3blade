@@ -1,0 +1,28 @@
+#!/usr/bin/ruby
+
+SHELF = 3
+BLADE = 5
+SECTOR_COUNT = 31457280
+DEVICE = "eth0"
+
+ENDPOINT = 's3.amazonaws.com'
+ACCESS_KEY = 'notsosecret'
+SECRET_KEY = 'soopers3kr1t'
+BUCKET = "ihasone"
+
+require 's3blade'
+
+def main
+	blade = S3Blade.new(:shelf => SHELF,
+	                    :blade => BLADE,
+	                    :device_size => SECTOR_COUNT * 512,
+	                    :network_device => DEVICE,
+	                    :s3_endpoint => ENDPOINT,
+	                    :s3_access_key => ACCESS_KEY,
+	                    :s3_secret_key => SECRET_KEY,
+	                    :s3_bucket => BUCKET)
+	
+	blade.run
+end
+
+main if __FILE__ == $0
