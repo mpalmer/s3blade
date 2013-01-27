@@ -77,7 +77,8 @@ class S3Blade
 		                       "#{@shelf}.#{@blade}:#{@hostname}"
 		@debug               = opts[:debug].nil? ? false : opts[:debug]
 
-		@sector_count        = @device_size / 512
+		@sector_count        = (@device_size / 512.0).ceil
+		@object_name_pattern = @object_name_pattern.sub('%s', @shelf.to_s).sub('%b', @blade.to_s)
 	end
 
 	# Fire up the s3blade listener and respond to requests.  Will keep going
