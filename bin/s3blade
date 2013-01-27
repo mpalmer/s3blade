@@ -20,6 +20,14 @@ def main(args)
 	options[:s3_secret_key] = ENV['S3_SECRET_KEY']
 
 	blade = S3Blade.new(options)
+	
+	Signal.trap("USR1") do
+		c = blade.cache
+		
+		puts "Cache info dump:"
+		puts "Sectors stored: #{c.length}, #{(c.length / blade.cache_size.to_f) * 100}% full"
+		puts "Oldest sector: #{c.sort_by { |k,v| v[:atime] }.first[1][:atime] rescue 'none'}"
+	end
 	blade.run
 end
 
@@ -87,6 +95,11 @@ def parse_cmdline(args)
 	        "The serial number reported for this device",
 	        "  (default: <shelf>.<blade>:<hostname>)",
 	        String) { |v| optargs[:serial] = v }
+	
+	opts.on('--cache-size', '=SECTORS',
+	        "The number of 512 byte sectors to store in the cache",
+	        "  (default: 100,000)",
+	        Integer) { |v| optargs[:cache_size] = v }
 	
 	opts.separator ""
 	opts.separator "Meta arguments:"

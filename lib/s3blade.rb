@@ -45,6 +45,9 @@ class S3Blade
 	#      "serial number" of the AoE device, as reported by the ATA
 	#      "identify device" command to something other than the default.
 	#
+	#   :cache_size (optional; default 100,000) -- Set the number of 512 byte
+	#      sectors to store in the in-memory cache.
+	#
 	#   :debug (optional; default false) -- Whether the object will dump a
 	#      whole pile of debugging output to stderr.
 	#      
@@ -76,10 +79,16 @@ class S3Blade
 		@serial              = opts[:serial] or
 		                       "#{@shelf}.#{@blade}:#{@hostname}"
 		@debug               = opts[:debug].nil? ? false : opts[:debug]
+		@cache_size          = opts[:cache_size] ||
+		                       100_000
 
 		@sector_count        = (@device_size / 512.0).ceil
 		@object_name_pattern = @object_name_pattern.sub('%s', @shelf.to_s).sub('%b', @blade.to_s)
+		
+		@cache = {}
 	end
+	
+	attr_reader :cache_size
 
 	# Fire up the s3blade listener and respond to requests.  Will keep going
 	# and going and going until told to stop by calling the 'stop' method.
@@ -148,7 +157,14 @@ class S3Blade
 	def stop
 		@stop = true
 	end
-
+	
+	# Deliver a copy of the cache to the caller.  Useful for getting, say,
+	# statistics and such.
+	def cache
+		@cache.dup
+	end
+	
+	private
 	def answer_config_query(to, tag, sock)
 		cfg_hdr = AoeCfgHeader.new
 		cfg_hdr.buffer_count = 16
@@ -210,7 +226,25 @@ class S3Blade
 		data = ""
 		cmd.sector_count.times do |sec|
 			abs_sector = cmd.first_sector+sec
-			objname = sector_filename(abs_sector)
+			
+			data << s3_read_sector(abs_sector)
+			
+			debug "#{abs_sector}: data is now #{data.length} bytes long"
+		end
+		
+		cache_trim
+
+		resp.data = data
+		resp
+	end
+	
+	def s3_read_sector(n)
+		debug "s3_read_sector(#{n})"
+		if @cache[n]
+			data = @cache[n][:data]
+		else
+			debug "Cache miss on sector #{n}"
+			objname = sector_filename(n)
 			debug "Looking for sector #{objname}"
 			obj = @bucket.objects[objname]
 			if obj.exists?
@@ -220,17 +254,17 @@ class S3Blade
 					debug "OMFG, short read!"
 				end
 				sector_data += "\0" * (512 - sector_data.length)
-				data << sector_data
 			else
 				debug "non-existing"
-				data << ("\0" * 512)
+				sector_data = "\0" * 512
 			end
 			
-			debug "#{abs_sector}: data is now #{data.length} bytes long"
+			data = sector_data
 		end
-
-		resp.data = data
-		resp
+		
+		@cache[n] = {:data => data, :atime => Time.now}
+		
+		data
 	end
 
 	def ata_write_sectors(cmd)
@@ -243,23 +277,38 @@ class S3Blade
 		
 		cmd.sector_count.times do |sec|
 			abs_sector = cmd.first_sector + sec
-			obj = @bucket.objects[sector_filename(abs_sector)]
 			f = sec*512
 			l = ((sec+1)*512)-1
-			data = cmd.data[f..l].to_s
-			if data == "\0" * 512
-				debug "Deleting sector #{abs_sector} because it's NULLs ALL THE WAY DOWN"
-				obj.delete
-			else
-				debug "Writing a #{data.length} byte #{data.class} to sector #{abs_sector}"
-				obj.write(data)
-			end
+			s3_write_sector(abs_sector, cmd.data[f..l].to_s)
 		end
-		
+
+		cache_trim
+
 		resp
 	end
+
+	def s3_write_sector(n, data)
+		obj = @bucket.objects[sector_filename(n)]
+		if data == "\0" * 512
+			debug "Deleting sector #{n} because it's NULLs ALL THE WAY DOWN"
+			obj.delete
+		else
+			debug "Writing a #{data.length} byte #{data.class} to sector #{n}"
+			obj.write(data)
+		end
+		@cache[n] = {:data => data, :atime => Time.now}
+	end
 	
-	private
+	# Rip out some old cache entries if we're getting full
+	def cache_trim
+		if @cache.length > @cache_size
+			# Since going through the cache is likely to take a little while,
+			# let's clear out the oldest 10% of entries and purge them all in
+			# one hit rather than doing this one by one
+			@cache.sort_by { |k,v| v[:atime] }[0..(@cache_size * 0.1)].each { |c| @cache.delete(c[0]) }
+		end
+	end
+
 	def broadcast_presence(sock)
 		aoe_hdr = AoeHeader.new
 		aoe_hdr.version = 0
