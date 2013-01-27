@@ -18,8 +18,9 @@ class S3Blade
 	#      blade IDs between 0 and 15, so that's all we'll accept, for
 	#      safety's sake.
 	#
-	#   :s3_endpoint (required) -- The FQDN of the S3-like service we're
-	#      storing blocks in.  This endpoint must support HTTPS.
+	#   :s3_endpoint (optional; default 's3.amazonaws.com') -- The FQDN of
+	#      the S3-like service we're storing blocks in.  This endpoint must
+	#      support HTTPS.
 	#
 	#   :s3_access_key (required) -- The access key for your S3-like service.
 	#
@@ -58,8 +59,8 @@ class S3Blade
 		if !@blade.is_a? Fixnum or @blade < 0 or @blade > 15
 			raise ArgumentError.new(":blade must be an integer between 0 and 15")
 		end
-		@s3_endpoint         = opts[:s3_endpoint] or
-		                       raise ArgumentError.new(":s3_endpoint is a required option to S3Blade#initialize")
+		@s3_endpoint         = opts[:s3_endpoint] ||
+		                       's3.amazonaws.com'
 		@s3_access_key       = opts[:s3_access_key] or
 		                       raise ArgumentError.new(":s3_access_key is a required option to S3Blade#initialize")
 		@s3_secret_key       = opts[:s3_secret_key] or
